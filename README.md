@@ -293,17 +293,6 @@ Live packet capture requires administrator/root privileges and (on Windows) the 
 
 ---
 
-## Future Work
-
-- **Modern datasets** — retrain on CIC-IDS-2018 or CIC-IoT-2023 to reduce domain shift with contemporary traffic.
-- **Deep learning** — explore LSTM or Transformer architectures for temporal sequence modelling of network flows.
-- **Online / incremental learning** — adapt the model continuously as new labelled flows are observed.
-- **Application-layer parsing** — integrate Zeek or Suricata to accurately extract HTTP/FTP/DNS features currently set to zero.
-- **Alert enrichment** — add GeoIP lookup, reverse DNS resolution, and threat-intelligence feed integration to attack alerts.
-- **SIEM integration** — export alerts to Elasticsearch, Splunk, or any syslog-compatible SIEM.
-
----
-
 ## Contributors
 
 > [Younes Sahraoui](https://github.com/ii0ns)<br>
