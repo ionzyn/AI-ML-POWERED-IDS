@@ -296,9 +296,7 @@ Live packet capture requires administrator/root privileges and (on Windows) the 
 ## Contributors
 
 | Name |
-|---|
 | Younes Sahraoui |
-|---|
 | Oussama Zayane |
 
 ---
