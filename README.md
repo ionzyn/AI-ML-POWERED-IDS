@@ -121,8 +121,8 @@ PFE test/
 ### 1. Clone the repository
 
 ```bash
-git clone <repository-url>
-cd "PFE test"
+git clone https://github.com/ii0ns/AI-ML-POWERED-IDS
+cd "AI-ML-POWERED-IDS"
 ```
 
 ### 2. Create and activate a virtual environment
@@ -227,6 +227,17 @@ Opens the dashboard in your default browser at `http://localhost:8501`.
 
 **UNSW-NB15** — created by the Australian Centre for Cyber Security (ACCS), UNSW Canberra.
 
+> **Academic use only.**  
+> Free use of the UNSW-NB15 dataset for academic research purposes is granted in perpetuity.  
+> **Commercial use is strictly prohibited.**  
+> Copyright is asserted by Nour Moustafa.  
+>  
+> Any use of this dataset must cite the following two papers:
+>
+> [1] Moustafa, N., & Slay, J. (2015). **UNSW-NB15: a comprehensive data set for network intrusion detection systems (UNSW-NB15 network data set).** *Military Communications and Information Systems Conference (MilCIS)*, IEEE, 2015.
+>
+> [2] Moustafa, N., & Slay, J. (2016). **The evaluation of Network Anomaly Detection Systems: Statistical analysis of the UNSW-NB15 data set and the comparison with the KDD99 data set.** *Information Security Journal: A Global Perspective*, 1–14.
+
 | Split | Total Samples | Normal | Attack |
 |---|---|---|---|
 | Training | 175,341 | 56,000 | 119,341 |
@@ -302,5 +313,13 @@ Live packet capture requires administrator/root privileges and (on Windows) the 
 
 ## License
 
+### Project code
 This project is currently unlicensed. All rights reserved by the author(s).  
 Contact the repository owner for usage permissions.
+
+### Dataset
+The UNSW-NB15 dataset is **not included** in this repository and is subject to its own terms:
+- Free for **academic research** use only.
+- **Commercial use is strictly prohibited.**
+- Copyright held by Nour Moustafa, UNSW Canberra.
+- See the [Dataset](#dataset) section above for the mandatory citations.
