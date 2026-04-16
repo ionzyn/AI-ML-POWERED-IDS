@@ -121,7 +121,7 @@ PFE test/
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/ii0ns/AI-ML-POWERED-IDS
+git clone https://github.com/ionzyn/AI-ML-POWERED-IDS
 cd "AI-ML-POWERED-IDS"
 ```
 
