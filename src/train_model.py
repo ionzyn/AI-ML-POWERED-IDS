@@ -3,8 +3,13 @@ import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import cross_val_score, StratifiedKFold
 from sklearn.metrics import classification_report
+from imblearn.pipeline import Pipeline as ImbPipeline
+from imblearn.over_sampling import SMOTE
 import joblib
+import shap
 import os
+
+os.makedirs('models', exist_ok=True)
 
 # ============================================================
 # Load cleaned data saved by prepare_data.py
@@ -78,22 +83,27 @@ cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 print("[...] Running 5-fold CV on Model A (OHE)...")
 cv_scores_ohe = cross_val_score(
     rf_ohe, X_train_ohe, y_train,
-    cv=cv, scoring='f1_weighted', n_jobs=-1
+    cv=cv, scoring='f1_macro', n_jobs=-1
 )
 
 print("[...] Running 5-fold CV on Model B (Label Encoding)...")
 cv_scores_le = cross_val_score(
     rf_le, X_train_le, y_train,
-    cv=cv, scoring='f1_weighted', n_jobs=-1
+    cv=cv, scoring='f1_macro', n_jobs=-1
 )
 
 print("[...] Running 5-fold CV on Model C (OHE + SMOTE)...")
+sampling_strategy = {'Analysis': 12000, 'Backdoor': 12000, 'Worms': 12000, 'Shellcode': 12000}
+smote_pipeline = ImbPipeline([
+    ('smote', SMOTE(sampling_strategy=sampling_strategy, random_state=42, k_neighbors=3)),
+    ('clf',   RandomForestClassifier(**rf_settings))
+])
 cv_scores_smote = cross_val_score(
-    rf_smote, X_train_smote, y_train_smote,
-    cv=cv, scoring='f1_weighted', n_jobs=-1
+    smote_pipeline, X_train_ohe, y_train,
+    cv=cv, scoring='f1_macro', n_jobs=-1
 )
 
-print(f"\n[✓] Cross-Validation Results (F1-weighted, 5 folds):")
+print(f"\n[✓] Cross-Validation Results (F1-macro, 5 folds):")
 print(f"  Model A — OHE (no SMOTE):   {cv_scores_ohe.mean():.4f}  (+/- {cv_scores_ohe.std():.4f})")
 print(f"  Model B — Label Encoding:   {cv_scores_le.mean():.4f}  (+/- {cv_scores_le.std():.4f})")
 print(f"  Model C — OHE + SMOTE:      {cv_scores_smote.mean():.4f}  (+/- {cv_scores_smote.std():.4f})")
@@ -163,8 +173,6 @@ print("\n[Info] These features are candidates for removal in the next iteration"
 print("[Info] Retrain the model without them and compare F1 scores")
 
 # --------Save trained models---------
-os.makedirs('models', exist_ok=True)
-
 joblib.dump(rf_ohe,   'models/rf_ohe.pkl')
 joblib.dump(rf_le,    'models/rf_le.pkl')
 joblib.dump(rf_smote, 'models/rf_smote.pkl')
@@ -193,10 +201,6 @@ for name, model, X_te in [
 # Step 5: XAI — SHAP Explainability
 # ============================================================
 print("\n==================== STEP 5: SHAP Explainability ====================")
-
-import shap
-import joblib
-import numpy as np
 
 print(f"[...] Building SHAP explainer on {best_model_name}...")
 explainer = shap.TreeExplainer(best_model)

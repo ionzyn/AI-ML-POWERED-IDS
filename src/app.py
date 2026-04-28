@@ -329,33 +329,36 @@ def predict_with_confidence(
     df_raw: pd.DataFrame,
     model_name: str,
     attack_threshold: float = 0.40,
+    normal_threshold: float = 0.40,
 ) -> List[Tuple[str, float]]:
     """
-    Return (label, confidence) pairs using asymmetric thresholding.
+    Return (label, confidence) pairs using symmetric thresholding on both
+    Normal and attack classes.
 
     Decision logic
     --------------
     This is a 10-class problem, so even a "confident" prediction sits around
-    35-50% in real-world traffic — well below a symmetric 50% threshold.
+    40-60% on real-world traffic.
 
-    We therefore use two separate bars:
+    Both Normal and attack classes require a minimum confidence to be accepted:
 
-    * Normal traffic  — trust the model if "Normal" is the argmax class,
-      regardless of its absolute confidence.  A 10-class RF saying 35% Normal
-      means Normal is 3.5× more likely than the next class; that is genuine
-      signal and should not be suppressed.
+    * Normal traffic  — accepted only when P(Normal) >= normal_threshold.
+      If the model is below that threshold for Normal, the flow is marked
+      "Uncertain" rather than blindly trusted — blindly trusting Normal
+      regardless of confidence causes false negatives on attack traffic
+      that distributes its probability mass across Normal and attack classes.
 
-    * Attack traffic  — only alert when the top attack class probability
-      exceeds attack_threshold (default 40%).  This eliminates low-signal
-      false positives while still catching clear detections.
+    * Attack traffic  — alert only when P(attack_class) >= attack_threshold.
+      This eliminates low-signal false positives.
 
-    Anything that doesn't meet either criterion is labelled "Uncertain".
+    Anything that doesn't meet either bar is labelled "Uncertain".
 
     Parameters
     ----------
-    df_raw           : raw feature DataFrame (proto/service/state as strings)
-    model_name       : key in MODEL_INFO
-    attack_threshold : minimum P(attack_class) required to emit an attack alert
+    df_raw             : raw feature DataFrame (proto/service/state as strings)
+    model_name         : key in MODEL_INFO
+    attack_threshold   : minimum P(attack_class) required to emit an attack alert
+    normal_threshold   : minimum P(Normal) required to accept a Normal prediction
     """
     models = load_models()
     if model_name not in models:
@@ -372,14 +375,14 @@ def predict_with_confidence(
         conf  = float(p[idx])
         label = classes[idx]
 
-        if label == "Normal":
-            # Always trust "Normal is most likely class" — no extra threshold needed.
+        if label == "Normal" and conf >= normal_threshold:
+            # Normal is most likely AND model is confident enough.
             final = "Normal"
-        elif conf >= attack_threshold:
+        elif label != "Normal" and conf >= attack_threshold:
             # Attack class is dominant enough to alert.
             final = label
         else:
-            # Model is uncertain: spread across many attack classes, no clear winner.
+            # Model is uncertain — do not emit Normal or attack, flag for review.
             final = "Uncertain"
 
         results.append((final, conf))
@@ -457,18 +460,19 @@ class FlowTracker:
 
     Key design choices
     ------------------
-    * MIN_DUR = 0.1 s  — prevents rate/sload/dload from blowing up for flows
+    * MIN_DUR = 0.5 s  — prevents rate/sload/dload from blowing up for flows
       that complete in microseconds (the #1 cause of false positives).
     * ConnectionTracker — computes ct_* features from a 100-flow rolling
       history instead of a packet-count proxy (was the #2 cause).
-    * MIN_PKTS = 2  — flows with only 1 packet carry almost no signal;
-      they are silently discarded rather than passed to the model.
+    * MIN_PKTS = 6  — flows with fewer packets have unstable rate-based
+      features (sload, dload, sinpkt, dinpkt); discarding them raises
+      confidence on the flows that are classified.
     """
 
     FLOW_TIMEOUT = 10.0   # seconds of inactivity → flush
     MAX_FLOW_PKTS = 100   # force-emit after this many packets
-    MIN_PKTS      = 2     # discard flows smaller than this (insufficient data)
-    MIN_DUR       = 0.10  # seconds — floor for duration to stabilise rate/load
+    MIN_PKTS      = 6     # discard flows smaller than this (insufficient data)
+    MIN_DUR       = 0.50  # seconds — floor for duration to stabilise rate/load
 
     def __init__(self):
         self.flows: Dict = {}
@@ -801,6 +805,7 @@ def compute_all_metrics() -> Tuple[Dict, pd.Series]:
             "precision": precision_score(y_test, y_pred, average="weighted", zero_division=0),
             "recall":    recall_score(y_test, y_pred,    average="weighted", zero_division=0),
             "f1":        f1_score(y_test, y_pred,        average="weighted", zero_division=0),
+            "f1_macro":  f1_score(y_test, y_pred,        average="macro",    zero_division=0),
             "report":    report,
         }
     return results, y_test
@@ -835,7 +840,7 @@ def _metric_row(metrics: Dict) -> None:
 def _check_plotly() -> bool:
     """Return True when Plotly is available; show an error and return False otherwise."""
     if not PLOTLY_AVAILABLE:
-        st.error("Plotly is not installed.  `pip install plotly`")
+        st.error("Charts are unavailable. Please contact the administrator.")
         return False
     return True
 
@@ -964,14 +969,10 @@ def section_dataset_overview():
 
 def section_live_detection():
     st.title("🔴 Live Traffic Detection")
+    st.caption("Real-time network flow classification. Flows below the confidence threshold are marked Uncertain.")
 
     if not SCAPY_AVAILABLE:
-        st.error(
-            "**Scapy is not installed.**  \n"
-            "```\npip install scapy\n```\n"
-            "On **Windows** also install **[Npcap](https://npcap.com/)** "
-            "and run Streamlit as **Administrator**."
-        )
+        st.error("Live capture requires Administrator privileges. Please restart the application as Administrator.")
         return
 
     if not _check_plotly():
@@ -1003,8 +1004,18 @@ def section_live_detection():
             key="live_conf",
             help=(
                 "Minimum model confidence required to raise an attack alert. "
-                "Normal traffic is always shown as Normal when it is the most "
-                "likely class — this threshold only gates attack predictions."
+                "Flows below this threshold for the top attack class are marked Uncertain."
+            ),
+        )
+        normal_threshold = st.slider(
+            "Normal Confidence Threshold",
+            min_value=0.20, max_value=0.80, value=0.40, step=0.05,
+            key="live_normal_conf",
+            help=(
+                "Minimum model confidence required to accept a Normal prediction. "
+                "Flows where Normal is the top class but below this threshold are "
+                "marked Uncertain instead — this prevents attacks whose probability "
+                "mass leaks into Normal from being silently ignored."
             ),
         )
 
@@ -1041,7 +1052,7 @@ def section_live_detection():
 
             try:
                 df_flow = flows_to_df([flow])
-                results = predict_with_confidence(df_flow, live_model, attack_threshold)
+                results = predict_with_confidence(df_flow, live_model, attack_threshold, normal_threshold)
                 pred, conf = results[0]
             except Exception:
                 pred, conf = "Unknown", 0.0
@@ -1136,7 +1147,7 @@ def section_pcap_analysis():
     st.caption("Upload a `.pcap` or `.pcapng` file to run the IDS on captured traffic.")
 
     if not SCAPY_AVAILABLE:
-        st.error("Scapy is required.  `pip install scapy`")
+        st.error("PCAP analysis requires Administrator privileges. Please restart the application as Administrator.")
         return
 
     if not _check_plotly():
@@ -1251,10 +1262,7 @@ def section_pcap_analysis():
 
 def section_model_comparison():
     st.title("⚖️ Model Comparison")
-    st.caption(
-        "Compare the three Random Forest variants across accuracy, precision, "
-        "recall, F1-score, and per-class performance."
-    )
+    st.caption("Performance comparison across the three trained models on the UNSW-NB15 test set.")
 
     if not _check_plotly():
         return
@@ -1268,13 +1276,15 @@ def section_model_comparison():
         results, y_test = compute_all_metrics()
 
     # ── Summary table ─────────────────────────────────────────────────────────
-    st.subheader("Overall Metrics (Weighted Average)")
+    st.subheader("Overall Metrics")
+    st.info("**F1-macro** gives equal weight to all 10 classes — including rare attack types. **F1-weighted** reflects the real traffic distribution.", icon="ℹ️")
     summary = {
         name: {
-            "Accuracy":  f"{v['accuracy']:.4f}",
-            "Precision": f"{v['precision']:.4f}",
-            "Recall":    f"{v['recall']:.4f}",
-            "F1 Score":  f"{v['f1']:.4f}",
+            "Accuracy":   f"{v['accuracy']:.4f}",
+            "Precision":  f"{v['precision']:.4f}",
+            "Recall":     f"{v['recall']:.4f}",
+            "F1-weighted":f"{v['f1']:.4f}",
+            "F1-macro ⭐": f"{v['f1_macro']:.4f}",
         }
         for name, v in results.items()
     }
@@ -1288,7 +1298,7 @@ def section_model_comparison():
     st.subheader("Visual Comparison")
     df_num = pd.DataFrame(
         {name: {"Accuracy": v["accuracy"], "Precision": v["precision"],
-                "Recall": v["recall"], "F1 Score": v["f1"]}
+                "Recall": v["recall"], "F1-weighted": v["f1"], "F1-macro ⭐": v["f1_macro"]}
          for name, v in results.items()}
     ).T.reset_index().melt(id_vars="index", var_name="Metric", value_name="Score")
     df_num.columns = ["Model", "Metric", "Score"]
@@ -1360,7 +1370,7 @@ def section_explainability():
     )
 
     if not SHAP_AVAILABLE:
-        st.error("SHAP is not installed.  `pip install shap`")
+        st.error("Explainability module is not available on this system.")
         return
 
     if not _check_plotly():
@@ -1371,7 +1381,7 @@ def section_explainability():
     X_sample = X_ohe.iloc[:200]          # same 200 rows used in train_model.py
 
     if explainer is None:
-        st.error("SHAP explainer not found at `models/shap_explainer.pkl`.")
+        st.error("Explainability data could not be loaded.")
         return
 
     models = load_models()
@@ -1407,7 +1417,7 @@ def section_explainability():
                 .head(25)
             )
         else:
-            st.info("Pre-computed SHAP values not found.  Computing on 100 test samples…")
+            st.info("Computing SHAP values, please wait…")
             with st.spinner():
                 try:
                     sv_new   = explainer.shap_values(X_sample.iloc[:100])
@@ -1483,7 +1493,7 @@ def section_explainability():
                 with st.spinner("Computing SHAP for this sample…"):
                     sv_local = explainer.shap_values(x_row)
             except Exception as exc:
-                st.warning(f"Online SHAP computation failed ({exc}). Falling back to pre-computed values.")
+                st.warning("Using pre-computed SHAP values for this sample.")
 
             if sv_local is not None:
                 class_idx = cls.index(pred) if pred in cls else 0

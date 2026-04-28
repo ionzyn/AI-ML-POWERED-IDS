@@ -43,6 +43,9 @@ print(f"[Before] Test [service] nulls:  {test_df['service'].isnull().sum()}")
 train_df['service'] = train_df['service'].fillna('none')
 test_df['service']  = test_df['service'].fillna('none')
 
+known_services   = train_df['service'].unique().tolist()
+test_df['service'] = test_df['service'].apply(lambda x: x if x in known_services else 'none')
+
 print(f"[After]  Train [service] nulls: {train_df['service'].isnull().sum()}")
 print(f"[After]  Test [service] nulls:  {test_df['service'].isnull().sum()}")
 print("\n[✓] Train [service] value counts:")
@@ -60,7 +63,9 @@ print(f"[Before] Train [state] unique values: {train_df['state'].nunique()}")
 print(f"[Info]   Rare [state]s being grouped: {rare_states}")
 
 train_df['state'] = train_df['state'].replace(rare_states, 'other')
-test_df['state']  = test_df['state'].replace(rare_states, 'other')
+
+known_states    = train_df['state'].unique().tolist()
+test_df['state'] = test_df['state'].apply(lambda x: x if x in known_states else 'other')
 
 print(f"[After]  Train [state] unique values: {train_df['state'].nunique()}")
 print("\n[✓] Train [state] value counts:")
@@ -79,7 +84,9 @@ print(f"[Info]   Number of rare [proto]s being grouped: {len(rare_protos)}")
 print(f"[Info]   Rare [proto]s: {rare_protos}")
 
 train_df['proto'] = train_df['proto'].replace(rare_protos, 'other')
-test_df['proto']  = test_df['proto'].replace(rare_protos, 'other')
+
+known_protos    = train_df['proto'].unique().tolist()
+test_df['proto'] = test_df['proto'].apply(lambda x: x if x in known_protos else 'other')
 
 print(f"[After]  Train [proto] unique values: {train_df['proto'].nunique()}")
 print("\n[✓] Train [proto] value counts:")
@@ -118,6 +125,25 @@ for col in cols_to_cap:
 print("\n[✓] Outlier capping complete")
 print(f"[✓] Final train shape: {train_df.shape}")
 print(f"[✓] Final test shape:  {test_df.shape}")
+
+# ============================================================
+# Step 4B: Zero out features that cannot be extracted at inference
+# ============================================================
+print("\n==================== STEP 4B: Zero Out Unextractable Features ====================")
+
+# These 5 features require application-layer parsing (HTTP/FTP) that Scapy
+# cannot perform on raw packets. During live detection they are always 0.
+# Zeroing them in training makes the model learn to classify WITHOUT relying
+# on them, which directly improves confidence on live traffic.
+LIVE_ZERO_FEATURES = [
+    'trans_depth', 'response_body_len',
+    'is_ftp_login', 'ct_ftp_cmd', 'ct_flw_http_mthd'
+]
+
+train_df[LIVE_ZERO_FEATURES] = 0
+test_df[LIVE_ZERO_FEATURES]  = 0
+
+print(f"[✓] Zeroed out {len(LIVE_ZERO_FEATURES)} unextractable features: {LIVE_ZERO_FEATURES}")
 
 # ============================================================
 # Step 5A: One-Hot Encode
@@ -197,8 +223,6 @@ print(f"[✓] LE  scaled min: {X_train_le.values.min():.4f}  max: {X_train_le.va
 # Step 7: SMOTE (Class Imbalance)
 # ============================================================
 print("\n==================== STEP 7: SMOTE (Class Imbalance) ====================")
-
-from imblearn.over_sampling import SMOTE
 
 print(f"[Before SMOTE] Class distribution:")
 print(y_train.value_counts())
